@@ -5,33 +5,31 @@ set -euo pipefail
 TOOL_NAME="ocaml"
 BINARY_NAME="ocaml"
 
-fail() {
-  echo -e "\e[31mFail:\e[m $*" >&2
-  exit 1
-}
+fail() { echo -e "\e[31mFail:\e[m $*" >&2; exit 1; }
 
 list_all_versions() {
-  curl -sL "https://api.github.com/repos/ocaml/ocaml/releases" 2>/dev/null | jq -r '.[].tag_name // empty' 2>/dev/null | sed 's/^v//' | sort -V
+  local curl_opts=(-sL)
+  [[ -n "${GITHUB_TOKEN:-}" ]] && curl_opts+=(-H "Authorization: token $GITHUB_TOKEN")
+  curl "${curl_opts[@]}" "https://api.github.com/repos/ocaml/ocaml/releases" 2>/dev/null | \
+    grep -o '"tag_name": "[^"]*"' | sed 's/"tag_name": "//' | sed 's/"$//' | sort -V
 }
 
 download_release() {
-  local version="$1"
-  local download_path="$2"
-  mkdir -p "$download_path"
-  echo "$version" > "$download_path/VERSION"
-  echo "Source compilation required for $TOOL_NAME $version"
+  local version="$1" download_path="$2"
+  local url="https://github.com/ocaml/ocaml/archive/refs/tags/${version}.tar.gz"
+  local archive="$download_path/ocaml.tar.gz"
+
+  echo "Downloading OCaml $version..."
+  curl -fsSL "$url" -o "$archive" || fail "Download failed"
+  tar -xzf "$archive" -C "$download_path" --strip-components=1
+  rm -f "$archive"
 }
 
 install_version() {
-  local version="$1"
-  local install_path="$2"
-  echo "Source compilation for $TOOL_NAME is not yet implemented"
-  echo "Please install $TOOL_NAME $version manually"
-  mkdir -p "$install_path/bin"
-  cat > "$install_path/bin/$BINARY_NAME" << SCRIPT
-#!/usr/bin/env bash
-echo "$TOOL_NAME $version - source compilation required"
-exit 1
-SCRIPT
-  chmod +x "$install_path/bin/$BINARY_NAME"
+  local install_type="$1" version="$2" install_path="$3"
+
+  cd "$ASDF_DOWNLOAD_PATH"
+  ./configure --prefix="$install_path" || fail "Configure failed"
+  make -j"$(nproc)" world.opt || fail "Build failed"
+  make install || fail "Install failed"
 }
